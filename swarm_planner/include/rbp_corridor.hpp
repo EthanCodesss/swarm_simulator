@@ -97,6 +97,7 @@ namespace SwarmPlanning {
         }
 
         void expand_box(std::vector<double> &box, double margin) {
+            // 存储候选盒子和更新后的盒子
             std::vector<double> box_cand, box_update;
             std::vector<int> axis_cand{0, 1, 2, 3, 4, 5};
 
@@ -107,11 +108,13 @@ namespace SwarmPlanning {
                 box_update = box;
 
                 //check update_box only! update_box + current_box = cand_box
+                // 该循环会一直拓展, 直到碰到障碍物为止
                 while (!isObstacleInBox(box_update, margin) && isBoxInBoundary(box_update)) {
                     i++;
                     if (i >= axis_cand.size()) {
                         i = 0;
                     }
+                    // 通过索引选择要扩展的轴
                     axis = axis_cand[i];
 
                     //update current box
@@ -403,22 +406,26 @@ namespace SwarmPlanning {
             Timer timer;
 
             planResult_ptr->SFC.resize(mission.qn);
+            // 遍历所有任务
             for (size_t qi = 0; qi < mission.qn; ++qi) {
+                // 用于存储上一个盒子的状态, 初始化为0
                 std::vector<double> box_prev;
                 for (int i = 0; i < 6; i++) box_prev.emplace_back(0);
-
+                // 遍历每个任务的初始轨迹, 除了最后一个点
                 for (int i = 0; i < planResult_ptr->initTraj[qi].size() - 1; i++) {
                     auto state = planResult_ptr->initTraj[qi][i];
+                    // 获得当前轨迹的三维坐标
                     double x = state.x();
                     double y = state.y();
                     double z = state.z();
 
                     std::vector<double> box;
                     auto state_next = planResult_ptr->initTraj[qi][i + 1];
+                    // 获取下一个轨迹的三维坐标
                     x_next = state_next.x();
                     y_next = state_next.y();
                     z_next = state_next.z();
-
+                    // 检查下一个轨迹点是否已经在之前的box中
                     if (isPointInBox(octomap::point3d(x_next, y_next, z_next), box_prev)) {
                         continue;
                     }
@@ -446,9 +453,11 @@ namespace SwarmPlanning {
                 // Generate box time segment
                 int box_max = planResult_ptr->SFC[qi].size();
                 int path_max = planResult_ptr->initTraj[qi].size();
+                // 记录每个盒子与轨迹点之间的关系
                 Eigen::MatrixXd box_log = Eigen::MatrixXd::Zero(box_max, path_max);
+                // 用于存储时间戳
                 std::vector<int> ts;
-
+                // 填充 box_log, 用于调试
                 for (int i = 0; i < box_max; i++) {
                     for (int j = 0; j < path_max; j++) {
                         if (isPointInBox(planResult_ptr->initTraj[qi][j], planResult_ptr->SFC[qi][i].first)) {
@@ -467,10 +476,13 @@ namespace SwarmPlanning {
                 }
 
                 int box_iter = 0;
+                // 循环遍历所有的轨迹点
                 for (int path_iter = 0; path_iter < path_max; path_iter++) {
+                    // 如果达到最后一个盒子, 终止循环
                     if (box_iter >= box_max - 1) {
                         break;
                     }
+                    // 检查当前盒子和下一个盒子是否都包含当前的轨迹点 path_iter
                     if (box_log(box_iter, path_iter) > 0 && box_log(box_iter + 1, path_iter) > 0) {
                         int count = 1;
                         while (path_iter + count < path_max && box_log(box_iter, path_iter + count) > 0
@@ -478,6 +490,7 @@ namespace SwarmPlanning {
                             count++;
                         }
                         double obs_index = path_iter + count / 2;
+                        // 为每个盒子的中心点分配时间戳
                         planResult_ptr->SFC[qi][box_iter].second = obs_index * param.time_step;
                         planResult_ptr->T.emplace_back(obs_index);
 
@@ -485,6 +498,7 @@ namespace SwarmPlanning {
                         box_iter++;
                     }
                 }
+                // 确保最后一个盒子的时间戳设置为整个路径规划的总时间长度, 这样可以保证路径规划在预定的时间内完成.
                 planResult_ptr->SFC[qi][box_max - 1].second = makespan * param.time_step;
             }
 
@@ -502,12 +516,13 @@ namespace SwarmPlanning {
             for (int qi = 0; qi < mission.qn; qi++) {
                 planResult_ptr->RSFC[qi].resize(mission.qn);
                 for (int qj = qi + 1; qj < mission.qn; qj++) {
+                    // 计算两个无人机初始轨迹的最大和最小长度
                     int path_max = std::max<int>(planResult_ptr->initTraj[qi].size(),
                                                  planResult_ptr->initTraj[qj].size());
                     int path_min = std::min<int>(planResult_ptr->initTraj[qi].size(),
                                                  planResult_ptr->initTraj[qj].size());
                     Eigen::MatrixXd sector_log = Eigen::MatrixXd::Zero(6, path_max);
-
+                    // 遍历每个轨迹点
                     for (int iter = 0; iter < path_max; iter++) {
                         // Get rel_pose
                         int rel_pose[4];
@@ -536,6 +551,8 @@ namespace SwarmPlanning {
                                     - planResult_ptr->initTraj[qi][iter].z()) / param.grid_z_res);
                         }
                         // Caution: (q1_size+q2_size)/grid_size should be small enough!
+                        // 存储符号信息, 用于确定两架无人机在各个轴向上的相对朝向
+                        // 判断j的位置 with respect to i
                         rel_pose[1] = (dx > SP_EPSILON_FLOAT) - (dx < -SP_EPSILON_FLOAT);
                         rel_pose[2] = (dy > SP_EPSILON_FLOAT) - (dy < -SP_EPSILON_FLOAT);
                         rel_pose[3] = (dz > SP_EPSILON_FLOAT) - (dz < -SP_EPSILON_FLOAT);
@@ -548,6 +565,7 @@ namespace SwarmPlanning {
                                 if (iter == 0) {
                                     sector_log(i, iter) = 1;
                                 } else {
+                                    // 如果无人机从一个轨迹点移动到下一个轨迹点而没有离开扇区 i, 那么这个扇区的计数
                                     sector_log(i, iter) = sector_log(i, iter - 1) + 1;
                                 }
                             }
@@ -555,12 +573,16 @@ namespace SwarmPlanning {
                     }
 
                     //find minimum jump sector path (heuristic greedy search)
+                    // 从轨迹最后一个点前向搜索
                     int iter = path_max - 1;
+                    // 存储下一个扇区的索引
                     int sector_next = -1;
+                    // 存储该扇区覆盖的轨迹点数
                     int count_next = sector_log.col(iter).maxCoeff(&sector_next);
 
                     planResult_ptr->RSFC[qi][qj].emplace_back(
                             std::make_pair(sec2normVec(sector_range[sector_next]), makespan * param.time_step));
+                    // 跳过当前扇区覆盖的轨迹点
                     iter = iter - count_next + 1;
 
                     while (iter > 1) {
@@ -568,9 +590,13 @@ namespace SwarmPlanning {
                         int count;
 
                         // if there is no intersection then allow to jump sector
+                        // 构建最小跳跃扇区路径
                         // except jumping through quadrotor (i.e. +x -> -x jumping is not allowed)
+                        // 表示轨迹点 iter处有跳跃
                         if (sector_log.col(iter).maxCoeff(&sector_curr) <= 1) {
+                            // 找到轨迹点
                             iter = iter - 1;
+                            // 计算与下一个扇区相反的方向的扇区
                             int sector_opp = 6 - 1 - sector_next;
 
                             if (sector_log.col(iter).maxCoeff(&sector_curr) <= 0) {
@@ -580,6 +606,7 @@ namespace SwarmPlanning {
                             } else if (sector_curr == sector_opp) {
                                 bool flag = false;
                                 for (int i = 0; i < 6; i++) {
+                                    // 检查是否有合法扇区
                                     if (i != sector_opp &&
                                         sector_log(i, iter) == sector_log.col(iter).maxCoeff(&sector_curr)) {
                                         flag = true;
@@ -595,6 +622,7 @@ namespace SwarmPlanning {
                             count = 0;
                         } else {
                             count = 1;
+                            // search for the middle waypoint among the intersection of two sequential convex sets
                             while (sector_log(sector_curr, iter + count) > 0) {
                                 count++;
                             }
